@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { useEngine, useBalance, money } from '../hooks';
-import { MIN_BET, MAX_BET } from '../engine/engine';
 import { unlockAudio } from '../engine/sound';
 
 const r2 = (n) => Math.round(n * 100) / 100;
@@ -41,7 +40,8 @@ export default function BetPanel({ engine, slot, index }) {
   const [autoDraft, setAutoDraft] = useState(b.autoCashAt.toFixed(2));
   const [editing, setEditing] = useState(false);
   const [editingAuto, setEditingAuto] = useState(false);
-  const locked = b.status !== 'idle';
+  const locked = b.status !== 'idle' || b.busy;
+  const short = balance !== null && b.amount > balance;
   const uid = `${engine.id}-${slot}`;
 
   useEffect(() => { if (!editing) setDraft(b.amount.toFixed(2)); }, [b.amount, editing]);
@@ -49,7 +49,7 @@ export default function BetPanel({ engine, slot, index }) {
 
   const setAmount = (n) => {
     if (!Number.isFinite(n)) n = b.amount;
-    engine.configure(slot, { amount: clamp(r2(n), MIN_BET, MAX_BET) });
+    engine.configure(slot, { amount: clamp(r2(n), s.limits.minBet, s.limits.maxBet) });
   };
   const commitDraft = () => {
     setEditing(false);
@@ -59,7 +59,7 @@ export default function BetPanel({ engine, slot, index }) {
     setEditingAuto(false);
     let n = parseFloat(autoDraft.replace(',', '.'));
     if (!Number.isFinite(n)) n = b.autoCashAt;
-    engine.configure(slot, { autoCashAt: clamp(r2(n), 1.01, 1000) });
+    engine.configure(slot, { autoCashAt: clamp(r2(n), s.limits.minAutoCashOut, s.limits.maxMultiplier) });
   };
 
   const act = () => {
@@ -81,14 +81,14 @@ export default function BetPanel({ engine, slot, index }) {
     button = (
       <button className="btn btn-main btn-cancel" onClick={act} data-slot={slot}>
         <span className="btn-verb">Cancel bet</span>
-        <small>{s.phase === 'betting' ? `${money(b.stake)} in this round` : 'Waiting for the next round'}</small>
+        <small>{s.phase === 'betting' && !b.queued ? `${money(b.stake)} in this round` : 'Waiting for the next round'}</small>
       </button>
     );
   } else {
     button = (
-      <button className="btn btn-main btn-bet" onClick={act} data-slot={slot} disabled={b.amount > balance}>
+      <button className="btn btn-main btn-bet" onClick={act} data-slot={slot} disabled={short || b.busy || s.conn !== 'online'}>
         <span className="btn-verb">Bet {money(b.amount)}</span>
-        <small>{b.amount > balance ? 'Not enough credits' : s.phase === 'betting' ? 'Joins this round' : 'Joins the next round'}</small>
+        <small>{s.conn !== 'online' ? 'Connecting…' : short ? 'Not enough balance' : s.phase === 'betting' ? 'Joins this round' : 'Joins the next round'}</small>
       </button>
     );
   }
@@ -97,7 +97,7 @@ export default function BetPanel({ engine, slot, index }) {
     <section className={`bet-panel status-${b.status}`} aria-label={`Bet ${index}`}>
       <div className="bet-row">
         <div className="amount">
-          <label className="field-label" htmlFor={`${uid}-amt`}>Bet amount</label>
+          <label className="sr-only" htmlFor={`${uid}-amt`}>Bet amount</label>
           <div className="stepper">
             <button className="step" aria-label="Decrease bet" disabled={locked} onClick={() => setAmount(b.amount / 2)}>½</button>
             <input
@@ -123,7 +123,7 @@ export default function BetPanel({ engine, slot, index }) {
       <div className="auto-row">
         <Toggle id={`${uid}-ab`} checked={b.autoBet} label="Auto bet" onChange={(v) => engine.configure(slot, { autoBet: v })} />
         <div className="auto-cash">
-          <Toggle id={`${uid}-ac`} checked={b.autoCash} label="Auto cash out at" onChange={(v) => engine.configure(slot, { autoCash: v })} />
+          <Toggle id={`${uid}-ac`} checked={b.autoCash} label="Cash out at" onChange={(v) => engine.configure(slot, { autoCash: v })} />
           <div className={`auto-input${b.autoCash ? '' : ' off'}`}>
             <input
               aria-label="Auto cash-out multiplier"
@@ -138,11 +138,12 @@ export default function BetPanel({ engine, slot, index }) {
           </div>
         </div>
       </div>
-      <p className={`last-result ${b.last?.type || ''}`}>
-        {b.last?.type === 'win' && <>Won <strong>{money(b.last.amount)}</strong> at {b.last.at.toFixed(2)}×</>}
-        {b.last?.type === 'loss' && <>Lost {money(b.last.amount)} when it crashed at {b.last.at.toFixed(2)}×</>}
-        {!b.last && <>Cash out before the crash to win your bet × the multiplier.</>}
-      </p>
+      {b.last && (
+        <p className={`last-result ${b.last.type}`}>
+          {b.last.type === 'win' && <>Won <strong>{money(b.last.amount)}</strong> at {b.last.at.toFixed(2)}×</>}
+          {b.last.type === 'loss' && <>Lost {money(b.last.amount)} at {b.last.at.toFixed(2)}×</>}
+        </p>
+      )}
     </section>
   );
 }

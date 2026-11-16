@@ -6,6 +6,8 @@ import { toastStore } from './engine/toasts';
 export const useEngine = (engine) => useSyncExternalStore(engine.subscribe, engine.getSnapshot);
 export const useBalance = () => useSyncExternalStore(wallet.subscribe, wallet.get);
 export const useMuted = () => useSyncExternalStore(sound.subscribe, sound.isMuted);
+export const useMusic = () => useSyncExternalStore(sound.subscribe, sound.isMusicOn);
+export const useVolume = () => useSyncExternalStore(sound.subscribe, sound.getVolume);
 export const useToasts = () => useSyncExternalStore(toastStore.subscribe, toastStore.get);
 
 export function useHash() {

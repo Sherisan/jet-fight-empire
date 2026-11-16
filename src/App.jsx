@@ -11,6 +11,7 @@ const engine = engines.jet;
 export default function App() {
   // One clock drives the rounds, even while the tab is in the background.
   useEffect(() => {
+    engine.connect();
     let raf;
     const loop = () => {
       engine.tick(performance.now());
