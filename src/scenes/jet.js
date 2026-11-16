@@ -2408,7 +2408,7 @@ export function createJetScene() {
       sams = sams.filter((m) => !m.done && m.y < h + 80 && m.x > -80 && m.x < w + 80);
 
       /* wingman joins after take-off */
-      if (running && v.tPhase > 1.6) wing.k = Math.min(1, wing.k + dt * 0.7);
+      // no wingman: you fly the only jet (it follows your mouse or finger)
       if (wing.k > 0) {
         if (crashed) { wing.x += w * 0.55 * dt; wing.y -= h * 0.25 * dt; }
         else {
@@ -2826,3 +2826,9 @@ function splash(fx, x, y, h) {
   }
   for (let i = 0; i < 6; i++) fx.add({ kind: 'steam', x: x + (Math.random() - 0.5) * h * 0.08, y: y - h * 0.02, vx: (Math.random() - 0.5) * h * 0.05, vy: -h * 0.06, life: 1.3, r: h * 0.022 });
 }
+
+// Pieces reused by the lobby thumbnail page (thumb.html).
+export const thumbKit = {
+  drawFighter, drawWarship, drawRange, PLAYER, WINGMAN, ENEMY,
+  sprites: () => (SPRITES ||= buildSprites()),
+};

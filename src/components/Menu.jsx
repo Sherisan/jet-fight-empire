@@ -36,7 +36,7 @@ const PACE = [2, 5, 10, 100];
 
 const BATTLE = [
   { name: 'Carrier deck', color: '#7fd3ff', text: 'Your fighter waits on the allied carrier during the countdown.' },
-  { name: 'Dogfight', color: '#ff8a3d', text: 'Enemy fighters attack in formations. You and your wingman fire missiles and shoot them down.' },
+  { name: 'Dogfight', color: '#ff8a3d', text: 'Enemy fighters attack in formations. Your jet fires missiles and shoots them down.' },
   { name: 'Enemy fleet', color: '#ff5a5a', text: 'Battleships, cruisers and destroyers fire from the sea. Your strikes sink them.' },
   { name: 'Obstacles', color: '#ffd166', text: 'Climb over barrage balloons, fly through flak and dodge heat-seeking missiles with flares.' },
   { name: 'Into the night', color: '#9b8cff', text: 'The higher the multiplier, the deeper the battle goes into a stormy night. One missile hit and the jet goes down.' },
