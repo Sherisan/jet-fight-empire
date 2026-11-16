@@ -584,6 +584,34 @@ kbd { font-family: var(--font-ui); font-size: 12px; padding: 1px 7px; border: 1p
   .side-col { min-height: 0; gap: 10px; }
   .side-col .bets { flex: none; }
   .live { flex: 1; min-height: 0; max-height: none; }
+  /* never cut off: if the column is still too tall, it scrolls (no visible bar) */
+  .side-col { overflow-y: auto; scrollbar-width: none; }
+  .side-col::-webkit-scrollbar { display: none; }
+  .side-col .live { min-height: 150px; }
+}
+.live-stats dt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Short screens, e.g. the lobby's game window on a laptop or a 125% display scale */
+@media (min-width: 861px) and (max-height: 700px) {
+  .topbar { padding-top: 6px; padding-bottom: 6px; }
+  .game { padding-top: 6px !important; padding-bottom: 6px !important; }
+  .side-col { gap: 6px; }
+  .side-col .bets { gap: 6px; }
+  .side-col .bet-panel { padding: 7px 8px; gap: 5px; }
+  .side-col .amount { gap: 4px; }
+  .side-col .stepper input { padding: 3px 2px; }
+  .side-col .chip { padding: 2px 0; }
+  .side-col .btn-main small { font-size: 11px; }
+  .side-col .auto-row { padding-top: 5px; gap: 4px 10px; }
+  .side-col .toggle { font-size: 13px; }
+  .side-col .last-result { margin: 0; font-size: 12px; }
+  .tabs { padding: 4px; }
+  .tabs button { padding: 5px; }
+  .live-stats { padding: 6px 12px; gap: 6px; }
+  .live-stats dt { font-size: 11px; }
+  .live-stats dd { font-size: 14px; }
+  .table-head { padding-top: 6px; padding-bottom: 4px; }
+  .row { padding: 4px 8px; font-size: 13px; }
 }
 
 /* ───────── Responsive ───────── */
