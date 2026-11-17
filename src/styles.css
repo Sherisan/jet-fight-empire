@@ -170,17 +170,65 @@ main:focus { outline: none; }
   font-variant-numeric: tabular-nums;
   text-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 0 32px color-mix(in srgb, var(--cash) 60%, transparent);
 }
-/* Running multiplier: a compact HUD pill at the top of the stage */
-.stage[data-phase='running'] .stage-overlay { padding-top: 10px; }
-.ov-run {
-  flex-direction: row; align-items: center; gap: 10px;
-  padding: 4px 16px 4px 12px; border-radius: 999px;
-  background: rgba(4, 10, 26, 0.6); backdrop-filter: blur(6px);
-  border: 1px solid color-mix(in srgb, var(--cash) 40%, transparent);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+/* Running multiplier: big glowing numbers at the top, zone above, players below */
+.stage[data-phase='running'] .stage-overlay { padding-top: clamp(10px, 3%, 26px); }
+.ov-run { gap: 2px; }
+.ov-zone {
+  font-size: clamp(10px, 1.1vw, 13px); font-weight: 800; letter-spacing: 0.3em; text-transform: uppercase;
+  color: rgba(255, 236, 214, 0.9); text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
 }
-.ov-run .ov-label { background: none; padding: 0; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
-.ov-run .ov-mult { font-size: clamp(26px, 4.5vw, 58px); text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35), 0 0 16px color-mix(in srgb, var(--cash) 50%, transparent); }
+.stage:not(.mini) .ov-run .ov-mult {
+  font-size: clamp(36px, 6vw, 84px); line-height: 0.95;
+  background: linear-gradient(180deg, #fff 18%, #ffe0a8 55%, #ff9a3d 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  text-shadow: none;
+  filter: drop-shadow(0 3px 0 rgba(0, 0, 0, 0.35)) drop-shadow(0 0 22px rgba(255, 150, 70, 0.55));
+}
+.stage:not(.mini) .ov-run .ov-mult[data-tier='mid'] { background-image: linear-gradient(180deg, #fff6e0 10%, #ffc46a 50%, #ff7a2a 100%); }
+.stage:not(.mini) .ov-run .ov-mult[data-tier='high'] {
+  background-image: linear-gradient(180deg, #fff 5%, #ffd166 40%, #ff4a2a 100%);
+  filter: drop-shadow(0 3px 0 rgba(0, 0, 0, 0.35)) drop-shadow(0 0 34px rgba(255, 90, 40, 0.8));
+}
+.ov-still { font-size: clamp(11px, 1.2vw, 14px); font-weight: 700; color: rgba(255, 255, 255, 0.9); text-shadow: 0 1px 6px rgba(0, 0, 0, 0.75); }
+
+/* Round pills, top left */
+.ov-pills { position: absolute; top: clamp(8px, 2%, 16px); left: clamp(8px, 2%, 16px); display: flex; gap: 6px; }
+.ov-pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px;
+  background: rgba(6, 8, 20, 0.55); border: 1px solid rgba(255, 255, 255, 0.12); backdrop-filter: blur(6px);
+  font-size: 12px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.ov-pill.ov-live i { width: 7px; height: 7px; border-radius: 50%; background: #3ee08a; box-shadow: 0 0 8px #3ee08a; animation: live-dot 1.6s ease-in-out infinite; }
+@keyframes live-dot { 50% { opacity: 0.35; } }
+
+/* Battle zones along the bottom of the stage */
+.zone-strip {
+  position: absolute; left: clamp(8px, 2%, 16px); right: clamp(8px, 2%, 16px); bottom: clamp(8px, 2%, 14px);
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px;
+}
+.zone {
+  position: relative; overflow: hidden; display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  padding: 6px 10px; border-radius: 8px;
+  background: rgba(6, 8, 20, 0.55); border: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(6px);
+  font-size: 12px; font-weight: 700; color: rgba(255, 255, 255, 0.55); white-space: nowrap;
+  transition: color 0.3s, border-color 0.3s, box-shadow 0.3s;
+}
+.zone span { position: relative; overflow: hidden; text-overflow: ellipsis; }
+.zone b { position: relative; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; opacity: 0.85; }
+.zone-fill {
+  position: absolute; inset: 0; transform-origin: left; transform: scaleX(0);
+  background: linear-gradient(90deg, rgba(255, 138, 61, 0.12), rgba(255, 138, 61, 0.4));
+}
+.zone.on { color: #fff; border-color: rgba(255, 160, 90, 0.8); box-shadow: 0 0 14px rgba(255, 138, 61, 0.35); }
+.zone.done { color: rgba(255, 255, 255, 0.75); }
+.zone.done .zone-fill { transform: scaleX(1) !important; background: rgba(255, 138, 61, 0.18); }
+.zone:not(.on):not(.done) .zone-fill { transform: scaleX(0) !important; }
+@media (max-width: 760px) {
+  .zone span { display: none; }
+  .zone { justify-content: center; padding: 5px 4px; }
+  .ov-pill:not(.ov-live) { display: none; }
+  .stage[data-phase='running'] .stage-overlay { padding-top: 40px; }
+}
 .ov-mult[data-tier='mid'] { color: color-mix(in srgb, var(--cash) 45%, #fff); }
 .ov-mult[data-tier='high'] { color: var(--cash); text-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 0 48px var(--cash); }
 .ov-mult.crashed { color: var(--danger); text-shadow: 0 4px 0 rgba(0, 0, 0, 0.4), 0 0 30px rgba(255, 60, 60, 0.6); }

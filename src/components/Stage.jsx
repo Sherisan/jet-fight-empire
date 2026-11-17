@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { useEngine, useReducedMotion, tier } from '../hooks';
+import { useEngine, useReducedMotion, tier, money } from '../hooks';
+import { ZONES, zonePos } from '../zones';
+
+const PeopleIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <circle cx="9" cy="8" r="3.4" /><path d="M2.5 19c.6-3.6 3.3-5.6 6.5-5.6s5.9 2 6.5 5.6z" />
+    <circle cx="17" cy="9" r="2.6" opacity="0.7" /><path d="M16 13.6c2.9.1 4.9 1.9 5.5 5.4h-4.3c-.2-2-.6-3.8-1.2-5.4z" opacity="0.7" />
+  </svg>
+);
 
 const COINS = Array.from({ length: 14 }, (_, i) => {
   const a = (i / 14) * Math.PI * 2 + (i % 2 ? 0.2 : -0.1);
@@ -47,6 +55,8 @@ export default function Stage({ game, engine, mini = false }) {
   const multRef = useRef(null);
   const countRef = useRef(null);
   const barRef = useRef(null);
+  const zoneRef = useRef(null);
+  const stripRef = useRef(null);
   const snap = useEngine(engine);
   const reduced = useReducedMotion();
   const reducedRef = useRef(reduced);
@@ -106,6 +116,19 @@ export default function Stage({ game, engine, mini = false }) {
         multRef.current.dataset.tier = tier(v.mult);
       }
       if (countRef.current && v.phase === 'betting') countRef.current.textContent = v.betLeft.toFixed(1);
+      // zone label over the multiplier, and the zone strip along the bottom
+      const zpos = v.phase === 'betting' ? 0 : zonePos(v.mult);
+      const zi = Math.min(ZONES.length - 1, Math.floor(zpos));
+      if (zoneRef.current && v.phase === 'running') zoneRef.current.textContent = `${ZONES[zi].name} · ${(v.runT * 0.32).toFixed(1)} km`;
+      const strip = stripRef.current;
+      if (strip) {
+        if (strip.dataset.zi !== String(zi)) {
+          strip.dataset.zi = String(zi);
+          [...strip.children].forEach((el, i) => { el.classList.toggle('on', i === zi); el.classList.toggle('done', i < zi); });
+        }
+        const fill = strip.children[zi]?.firstElementChild;
+        if (fill) fill.style.transform = `scaleX(${Math.min(1, Math.max(0, zpos - zi))})`;
+      }
       if (barRef.current && v.phase === 'betting') barRef.current.style.transform = `scaleX(${1 - v.betProgress})`;
     };
     loop();
@@ -122,11 +145,23 @@ export default function Stage({ game, engine, mini = false }) {
   }, [game, engine, mini]);
 
   const cp = snap.crashPoint;
+  // round pills: players and money in this round, and who is still flying
+  const mine = ['A', 'B'].map((k) => snap.bets[k]).filter((b) => b.status === 'live' || b.status === 'pending');
+  const done = snap.myLog.filter((e) => e.round === snap.roundId);
+  const players = snap.bots.length + mine.length + done.length;
+  const staked = snap.bots.reduce((a, b) => a + b.amount, 0) + mine.reduce((a, b) => a + b.stake, 0) + done.reduce((a, e) => a + e.stake, 0);
+  const stillIn = snap.bots.filter((b) => b.cashedAt == null).length + mine.filter((b) => b.status === 'live').length;
 
   return (
     <div className={`stage${mini ? ' mini' : ''}`} data-phase={snap.phase} ref={wrapRef}>
       <canvas ref={canvasRef} aria-hidden="true" />
       <div className="stage-overlay" aria-hidden="true">
+        {!mini && snap.conn === 'online' && (
+          <div className="ov-pills">
+            <span className="ov-pill ov-live"><i />Live · #{snap.roundId}</span>
+            <span className="ov-pill"><PeopleIcon />{players} · {money(staked)}</span>
+          </div>
+        )}
         {snap.conn !== 'online' && (
           <div className="ov-wait">
             <span className="ov-label">{snap.connMessage || 'Connecting to the game server…'}</span>
@@ -142,8 +177,9 @@ export default function Stage({ game, engine, mini = false }) {
         )}
         {snap.conn === 'online' && snap.phase === 'running' && (
           <div className="ov-run">
-            {!mini && <span className="ov-label">{game.runningLabel}</span>}
+            {!mini && <span className="ov-zone" ref={zoneRef}>{ZONES[0].name}</span>}
             <span className="ov-mult" ref={multRef} data-tier="low">1.00×</span>
+            {!mini && <span className="ov-still">{stillIn} {stillIn === 1 ? 'player' : 'players'} still in</span>}
           </div>
         )}
         {snap.conn === 'online' && snap.phase === 'crashed' && cp !== null && (
@@ -153,6 +189,17 @@ export default function Stage({ game, engine, mini = false }) {
           </div>
         )}
         {!mini && <WinPops log={snap.myLog} />}
+        {!mini && (
+          <div className="zone-strip" ref={stripRef}>
+            {ZONES.map((z, i) => (
+              <div key={z.name} className={`zone${i === 0 ? ' on' : ''}`}>
+                <i className="zone-fill" />
+                <span>{z.name}</span>
+                <b>{z.at.toFixed(2)}×</b>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       {!mini && (
         <p className="sr-only" aria-live="polite">

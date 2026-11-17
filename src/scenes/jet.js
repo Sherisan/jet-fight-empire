@@ -2,6 +2,7 @@
 // The battle runs from sunset into night as the multiplier climbs.
 import { TAU, clamp, lerp, easeOut, hash, rr, particles } from './util';
 import { sfx } from '../engine/sound';
+import { zonePos } from '../zones';
 
 /* ───────── Colour ───────── */
 
@@ -10,12 +11,35 @@ function mix(a, b, t, alpha = 1) {
   const A = toRgb(a), B = toRgb(b);
   return `rgba(${Math.round(lerp(A[0], B[0], t))},${Math.round(lerp(A[1], B[1], t))},${Math.round(lerp(A[2], B[2], t))},${alpha})`;
 }
+// a → b by t, then towards c by u
+function mix2(a, b, t, c, u, alpha = 1) {
+  const A = toRgb(a), B = toRgb(b), C = toRgb(c);
+  const ch = (i) => Math.round(lerp(lerp(A[i], B[i], t), C[i], u));
+  return `rgba(${ch(0)},${ch(1)},${ch(2)},${alpha})`;
+}
 const wrap = (v, span) => ((v % span) + span) % span;
 
 const SKY_DUSK = ['#0b1636', '#26296a', '#62367e', '#d0606c', '#ffa35a'];
 const SKY_NIGHT = ['#02040c', '#060d26', '#0f1a44', '#1f2558', '#3c2c5c'];
 const SEA_DUSK = ['#5d3b6a', '#2a2b58', '#081325'];
 const SEA_NIGHT = ['#1a1c42', '#0d1434', '#03070f'];
+// One sky per battle zone (see src/zones.js): golden hour, crimson sunset,
+// violet twilight, storm, night. Blended along the zone position.
+const ZONE_SKY = [
+  ['#16244e', '#3a3f86', '#9a5a8e', '#f0866a', '#ffc27a'],
+  ['#120c2e', '#341854', '#82285e', '#de4a48', '#ff8a3a'],
+  ['#08081f', '#1b1442', '#45215c', '#7e3464', '#bc6458'],
+  ['#05080f', '#0f1626', '#1d2738', '#2f3b4e', '#56596a'],
+  ['#02040c', '#050b22', '#0c1640', '#1a2256', '#36295a'],
+];
+// Colour grade laid over the finished frame, per zone (soft-light).
+const ZONE_GRADE = ['#ffb070', '#ff6a40', '#a04ad0', '#4a8aa8', '#3a5ad8'];
+function zoneBlend(table, zp) {
+  const i = Math.min(table.length - 2, Math.max(0, Math.floor(zp)));
+  const t = clamp(zp - i, 0, 1);
+  const a = table[i], b = table[i + 1];
+  return Array.isArray(a) ? a.map((c, k) => mix(c, b[k], t)) : mix(a, b, t);
+}
 
 const PLAYER = { body: '#eef2f8', mid: '#b4c0d4', dark: '#66748e', accent: '#ff8a3d', insignia: 'player', glass: [127, 211, 255], code: '01' };
 const WINGMAN = { body: '#d6dde8', mid: '#9eabc1', dark: '#56637c', accent: '#7fd3ff', insignia: 'player', glass: [127, 211, 255], code: '02', helmet: '#ffd166' };
@@ -1737,10 +1761,11 @@ function missileIcon(ctx, x, y, s, color) {
 /* ───────── Scene ───────── */
 
 export function createJetScene() {
-  let time = 0, scroll = 0, speed = 0, night = 0;
+  let time = 0, scroll = 0, speed = 0, night = 0, zp = 0;
   let lastPhase = null, lastRound = -1, crashTime = 0, crashPos = null, crashFrom = null, scrollAtStart = 0;
   const fx = particles();
-  let ships = [], enemies = [], missiles = [], sams = [], balloons = [], wreck = null, contrail = [];
+  let ships = [], enemies = [], missiles = [], sams = [], balloons = [], wreck = null, contrail = [], bombs = [];
+  let nextBomb = 2.5;
   let kills = { jets: 0, ships: 0, dodged: 0 };
   let nextEnemy = 2, nextFlak = 1, nextAttack = 1.5, nextShipMid = 0, nextShipFar = 0, nextSam = 3, nextBalloon = 2.5, nextBolt = 3;
   let jetY = 0, jetVy = 0, dodge = 0, shooter = 0;
@@ -1758,6 +1783,7 @@ export function createJetScene() {
     balloons = [];
     contrail = [];
     chutes = [];
+    bombs = [];
     wreck = null;
     kills = { jets: 0, ships: 0, dodged: 0 };
     nextShipMid = scroll * 0.5 + w * 0.9;
@@ -1794,7 +1820,7 @@ export function createJetScene() {
       if (v.phase !== lastPhase || v.roundId !== lastRound) {
         if (running) {
           scrollAtStart = scroll;
-          nextEnemy = 1.8; nextFlak = 1.4; nextAttack = 1.4; nextSam = 3; nextBalloon = 2.2; nextBolt = 2;
+          nextEnemy = 1.8; nextFlak = 1.4; nextAttack = 1.4; nextSam = 3; nextBalloon = 2.2; nextBolt = 2; nextBomb = 2.5;
         }
         if (crashed && lastPhase === 'running') {
           crashTime = time;
@@ -1817,10 +1843,14 @@ export function createJetScene() {
       }
       if (ships.length === 0 && enemies.length === 0 && nextShipMid === 0) resetWorld(w);
 
-      // the battle runs from sunset into night as the multiplier climbs
-      const nT = running ? clamp(Math.log(v.mult) / Math.log(25), 0, 1) : crashed ? night : 0;
+      // the battle flies through the zones: golden hour → sunset → twilight → storm → night
+      const zpT = running ? zonePos(v.mult) : crashed ? zp : 0;
+      zp = lerp(zp, zpT, Math.min(1, dt * (v.phase === 'betting' ? 1.5 : 1.1)));
+      const nT = running ? clamp((zpT - 0.3) / 3.2, 0, 1) : crashed ? night : 0;
       night = lerp(night, nT, Math.min(1, dt * (v.phase === 'betting' ? 1.5 : 0.8)));
       const n = night;
+      const storm = clamp(1 - Math.abs(zp - 3.3) / 0.85, 0, 1);
+      const nightRaid = clamp((zp - 3.6) / 0.5, 0, 1);
 
       const target = running ? w * (0.22 + 0.32 * clamp(Math.log(v.mult) / Math.log(10), 0, 1.8)) : 0;
       speed = lerp(speed, target, Math.min(1, dt * 2.5));
@@ -1869,14 +1899,15 @@ export function createJetScene() {
         ctx.globalAlpha = 1;
       };
       const sg = ctx.createLinearGradient(0, 0, 0, horizon);
-      for (let i = 0; i < 5; i++) sg.addColorStop(i / 4, mix(SKY_DUSK[i], SKY_NIGHT[i], n));
+      const skyCols = zoneBlend(ZONE_SKY, zp);
+      for (let i = 0; i < 5; i++) sg.addColorStop(i / 4, skyCols[i]);
       ctx.fillStyle = sg;
       ctx.fillRect(-20, -20, w + 40, horizon + 20);
 
       const sunX = w * 0.78, sunR = h * 0.12, sunY = horizon + sunR * 0.25 + n * sunR * 1.5;
       const sunA = 1 - n * 0.85;
       const moonA = clamp((n - 0.3) / 0.4, 0, 1);
-      const moonX = w * 0.64, moonY = h * 0.17, moonR = h * 0.045;
+      const moonX = w * 0.66, moonY = h * 0.19, moonR = h * (0.05 + nightRaid * 0.025);
 
       // warm afterglow spreading along the horizon
       const ag = ctx.createRadialGradient(sunX, horizon, 0, sunX, horizon, w * 0.95);
@@ -1898,20 +1929,51 @@ export function createJetScene() {
 
       // moon rises as the sun sets
       if (moonA > 0) {
-        const mg = ctx.createRadialGradient(moonX, moonY, moonR * 0.5, moonX, moonY, moonR * 5);
-        mg.addColorStop(0, `rgba(200,212,255,${0.4 * moonA})`);
+        const mg = ctx.createRadialGradient(moonX, moonY, moonR * 0.5, moonX, moonY, moonR * 6);
+        mg.addColorStop(0, `rgba(200,212,255,${0.45 * moonA})`);
+        mg.addColorStop(0.35, `rgba(150,170,255,${0.12 * moonA})`);
         mg.addColorStop(1, 'rgba(200,212,255,0)');
         ctx.fillStyle = mg;
-        ctx.beginPath(); ctx.arc(moonX, moonY, moonR * 5, 0, TAU); ctx.fill();
+        ctx.beginPath(); ctx.arc(moonX, moonY, moonR * 6, 0, TAU); ctx.fill();
         const md = ctx.createRadialGradient(moonX - moonR * 0.3, moonY - moonR * 0.3, 0, moonX, moonY, moonR);
         md.addColorStop(0, `rgba(250,252,255,${moonA})`);
         md.addColorStop(1, `rgba(200,208,235,${moonA})`);
         ctx.fillStyle = md;
         ctx.beginPath(); ctx.arc(moonX, moonY, moonR, 0, TAU); ctx.fill();
         ctx.fillStyle = `rgba(160,170,205,${0.45 * moonA})`;
-        for (const [cx2, cy2, cr] of [[-0.3, -0.2, 0.22], [0.25, 0.15, 0.16], [0.05, 0.45, 0.12], [0.4, -0.35, 0.09]]) {
+        for (const [cx2, cy2, cr] of [[-0.3, -0.2, 0.22], [0.25, 0.15, 0.16], [0.05, 0.45, 0.12], [0.4, -0.35, 0.09], [-0.5, 0.3, 0.1], [0.55, 0.45, 0.07]]) {
           ctx.beginPath(); ctx.arc(moonX + cx2 * moonR, moonY + cy2 * moonR, cr * moonR, 0, TAU); ctx.fill();
         }
+        // terminator shading: the lit side faces the sunset
+        const msh = ctx.createLinearGradient(moonX - moonR, moonY, moonX + moonR, moonY);
+        msh.addColorStop(0, `rgba(40,48,90,${0.5 * moonA})`);
+        msh.addColorStop(0.55, 'rgba(40,48,90,0)');
+        ctx.fillStyle = msh;
+        ctx.beginPath(); ctx.arc(moonX, moonY, moonR, 0, TAU); ctx.fill();
+      }
+
+      // northern lights ripple over the night raid
+      if (nightRaid > 0 && !reduced) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        for (let r = 0; r < 3; r++) {
+          const baseY = h * (0.1 + r * 0.06);
+          const col = r === 1 ? '150,110,255' : '90,255,190';
+          for (let x = -20; x < w + 20; x += 6) {
+            const u = x / w;
+            const yy = baseY + Math.sin(u * 7 + time * 0.4 + r * 2) * h * 0.035 + Math.sin(u * 17 - time * 0.7 + r) * h * 0.01;
+            const len = h * (0.12 + 0.08 * Math.sin(u * 11 + time * 0.9 + r * 3));
+            const a = nightRaid * (0.1 + 0.08 * Math.sin(u * 23 + time * 1.3 + r)) * (r === 1 ? 0.7 : 1);
+            if (a <= 0.005) continue;
+            const ag2 = ctx.createLinearGradient(0, yy, 0, yy + len);
+            ag2.addColorStop(0, `rgba(${col},0)`);
+            ag2.addColorStop(0.25, `rgba(${col},${a})`);
+            ag2.addColorStop(1, `rgba(${col},0)`);
+            ctx.fillStyle = ag2;
+            ctx.fillRect(x, yy, 7, len);
+          }
+        }
+        ctx.restore();
       }
 
       // soft sun rays fading out with distance
@@ -1986,6 +2048,24 @@ export function createJetScene() {
         spr(SP.clouds[(i + 2) % 6], cx, cy, cw, cw * 0.47, 0.95);
       }
 
+      // storm front: a heavy dark cloud deck rolls in overhead
+      if (storm > 0.01) {
+        for (let i = 0; i < 7; i++) {
+          const span = w * 1.8;
+          const cx = wrap(hash(i, 411) * span - scroll * 0.08 - time * 6, span) - w * 0.4;
+          const cy = h * (0.02 + hash(i, 412) * 0.16);
+          const cw = h * (0.7 + hash(i, 413) * 0.5);
+          ctx.globalAlpha = storm * 0.95;
+          ctx.drawImage(SP.clouds[i % 6][1], cx - cw / 2, cy - cw * 0.235, cw, cw * 0.47);
+        }
+        ctx.globalAlpha = 1;
+        const sd2 = ctx.createLinearGradient(0, 0, 0, horizon);
+        sd2.addColorStop(0, `rgba(6,10,20,${0.55 * storm})`);
+        sd2.addColorStop(1, 'rgba(6,10,20,0)');
+        ctx.fillStyle = sd2;
+        ctx.fillRect(-20, -20, w + 40, horizon + 20);
+      }
+
       // a far-off battle flickers on the horizon
       flashes = flashes.filter((f) => time - f.t0 < 0.7);
       if (!reduced && Math.random() < dt * (0.35 + n * 1.2 + (running ? 0.5 : 0))) flashes.push({ x: w * (0.05 + Math.random() * 0.9), t0: time, s: 0.5 + Math.random() });
@@ -2031,10 +2111,10 @@ export function createJetScene() {
       }
 
       // lightning in the night storm
-      if (running && n > 0.55 && !reduced) {
+      if (running && (n > 0.55 || storm > 0.3) && !reduced) {
         nextBolt -= dt;
         if (nextBolt <= 0) {
-          nextBolt = 2.5 + Math.random() * 4;
+          nextBolt = (2.5 + Math.random() * 4) / (1 + storm * 1.6);
           flashT = time;
           let bx = w * (0.1 + Math.random() * 0.8), byy = h * 0.06;
           bolt = [[bx, byy]];
@@ -2096,6 +2176,33 @@ export function createJetScene() {
       drawIslands(ctx, w, h, horizon, scroll, 0.03, 0, n, time);
       drawIslands(ctx, w, h, horizon, scroll, 0.07, 1, n, time);
 
+      // far-off anti-aircraft fire: tracer streams arcing up from the horizon
+      if (running && !reduced) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.lineCap = 'round';
+        const streams = 3 + Math.round(zp * 1.5);
+        for (let i = 0; i < streams; i++) {
+          const per = 2.2 + hash(i, 431) * 2;
+          const ph = (time + hash(i, 432) * per) % per;
+          if (ph > 1.2) continue;
+          const span = w * 1.4;
+          const bx = wrap(hash(i, 433) * span - scroll * 0.07, span) - w * 0.2;
+          const ang = -Math.PI / 2 + (hash(i, 434) - 0.5) * 0.9;
+          for (let k = 0; k < 6; k++) {
+            const d = (ph * 1.3 - k * 0.07) * h * 0.55;
+            if (d < 0) continue;
+            const x = bx + Math.cos(ang) * d;
+            const y = horizon - 2 + Math.sin(ang) * d + d * d * 0.0006;
+            const a = (1 - ph / 1.2) * (0.9 - k * 0.12);
+            ctx.strokeStyle = `rgba(255,${150 + k * 12},90,${a})`;
+            ctx.lineWidth = Math.max(1.2, h * 0.003);
+            ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - Math.cos(ang) * h * 0.012, y - Math.sin(ang) * h * 0.012); ctx.stroke();
+          }
+        }
+        ctx.restore();
+      }
+
       // haze where the sky meets the sea
       const hz = ctx.createLinearGradient(0, horizon - h * 0.08, 0, horizon);
       hz.addColorStop(0, mix('#ffa88a', '#2a2f66', n, 0));
@@ -2117,8 +2224,8 @@ export function createJetScene() {
 
       /* ocean */
       const og = ctx.createLinearGradient(0, horizon, 0, h);
-      og.addColorStop(0, mix(SEA_DUSK[0], SEA_NIGHT[0], n));
-      og.addColorStop(0.3, mix(SEA_DUSK[1], SEA_NIGHT[1], n));
+      og.addColorStop(0, mix2(SEA_DUSK[0], SEA_NIGHT[0], n, '#26343e', storm * 0.7));
+      og.addColorStop(0.3, mix2(SEA_DUSK[1], SEA_NIGHT[1], n, '#16222c', storm * 0.7));
       og.addColorStop(1, mix(SEA_DUSK[2], SEA_NIGHT[2], n));
       ctx.fillStyle = og;
       ctx.fillRect(-20, horizon, w + 40, h - horizon + 20);
@@ -2436,6 +2543,29 @@ export function createJetScene() {
           for (let i = 0; i < 5; i++) fx.add({ kind: 'tracer', x: px + jetSize * 0.5, y: jetY + pitch * jetSize * 0.5, vx: Math.cos(pitch) * w * 1.6, vy: Math.sin(pitch) * w * 1.6, life: 0.35, delay: i * 0.05, color: '#fff3c4' });
         }
       }
+      // a hit on an enemy ship (missile or bomb): fires, then she sinks with her crew jumping
+      const hitShip = (sh) => {
+        sh.hp -= 1;
+        sh.targeted = false;
+        sh.hit = true;
+        if (sh.hp > 0) { sfx.boom(); return; }
+        kills.ships += 1;
+        sfx.sink();
+        const p = shipPos(sh);
+        const L = sh.type === 'battleship' ? 130 : sh.type === 'cruiser' ? 105 : 82;
+        sh.secondary = 4;
+        sh.breaks = sh.type !== 'destroyer';
+        boom(fx, p.x, p.y - 30 * p.s, h, 1.6);
+        splash(fx, p.x + (Math.random() - 0.5) * L * p.s, p.y, h * 0.9);
+        const kinds = ['buoy', 'crate', 'buoy', 'crate', 'buoy', 'raft'];
+        kinds.forEach((what, i) => {
+          fx.add({ kind: 'float', what, x: p.x + (i / (kinds.length - 1) - 0.5) * L * 2 * p.s, y: p.y + h * (0.005 + Math.random() * 0.03), vx: -speed * 0.5 - h * 0.01, vy: 0, life: 7, seed: Math.random() * 6, r: h * (what === 'raft' ? 0.012 : 0.008) });
+        });
+        for (let i = 0; i < 4; i++) fx.add({ kind: 'pyre', x: p.x + (Math.random() - 0.5) * L * 1.6 * p.s, y: p.y + h * 0.008, vx: -speed * 0.5, vy: 0, life: 3.5 + Math.random() * 2, r: h * (0.025 + Math.random() * 0.02) });
+        for (let i = 0; i < 5; i++) {
+          fx.add({ kind: 'sailor', x: p.x + (Math.random() - 0.5) * L * 1.4 * p.s, y: p.y - 22 * p.s, vx: (Math.random() - 0.5) * h * 0.3, vy: -h * (0.25 + Math.random() * 0.25), g: h * 1.4, life: 4, rot: 0, vr: (Math.random() - 0.5) * 8, r: h * 0.02, floor: p.y + h * 0.012 });
+        }
+      };
       for (const m of missiles) {
         const k = (time - m.t0) / m.dur;
         let tx, ty;
@@ -2478,32 +2608,70 @@ export function createJetScene() {
             }
             kills.jets += 1;
             sfx.boom();
-          } else if (m.tgt.kind === 'ship' && m.tgt.ref.hp > 0) {
-            m.tgt.ref.hp -= 1;
-            m.tgt.ref.targeted = false;
-            m.tgt.ref.hit = true;
-            if (m.tgt.ref.hp <= 0) {
-              kills.ships += 1;
-              sfx.sink();
-              const sh = m.tgt.ref, p = shipPos(sh);
-              const L = sh.type === 'battleship' ? 130 : sh.type === 'cruiser' ? 105 : 82;
-              sh.secondary = 4;
-              sh.breaks = sh.type !== 'destroyer';
-              boom(fx, p.x, p.y - 30 * p.s, h, 1.6);
-              splash(fx, p.x + (Math.random() - 0.5) * L * p.s, p.y, h * 0.9);
-              const kinds = ['buoy', 'crate', 'buoy', 'crate', 'buoy', 'raft'];
-              kinds.forEach((what, i) => {
-                fx.add({ kind: 'float', what, x: p.x + (i / (kinds.length - 1) - 0.5) * L * 2 * p.s, y: p.y + h * (0.005 + Math.random() * 0.03), vx: -speed * 0.5 - h * 0.01, vy: 0, life: 7, seed: Math.random() * 6, r: h * (what === 'raft' ? 0.012 : 0.008) });
-              });
-              for (let i = 0; i < 4; i++) fx.add({ kind: 'pyre', x: p.x + (Math.random() - 0.5) * L * 1.6 * p.s, y: p.y + h * 0.008, vx: -speed * 0.5, vy: 0, life: 3.5 + Math.random() * 2, r: h * (0.025 + Math.random() * 0.02) });
-              for (let i = 0; i < 5; i++) {
-                fx.add({ kind: 'sailor', x: p.x + (Math.random() - 0.5) * L * 1.4 * p.s, y: p.y - 22 * p.s, vx: (Math.random() - 0.5) * h * 0.3, vy: -h * (0.25 + Math.random() * 0.25), g: h * 1.4, life: 4, rot: 0, vr: (Math.random() - 0.5) * 8, r: h * 0.02, floor: p.y + h * 0.012 });
-              }
-            } else sfx.boom();
-          }
+          } else if (m.tgt.kind === 'ship' && m.tgt.ref.hp > 0) hitShip(m.tgt.ref);
         }
       }
       missiles = missiles.filter((m) => !m.done);
+
+      /* bombing runs: a stick of three bombs on the next ship ahead */
+      if (running && !mini && v.tPhase > 2) {
+        nextBomb -= dt;
+        if (nextBomb <= 0) {
+          const sh = ships.find((x) => x.layer === 'mid' && x.hp > 0 && !x.bombed && shipPos(x).x > px + w * 0.1 && shipPos(x).x < px + w * 0.6);
+          if (sh) {
+            nextBomb = 2.4 + Math.random() * 2.2;
+            sh.bombed = true;
+            const p = shipPos(sh);
+            const L = sh.type === 'battleship' ? 130 : sh.type === 'cruiser' ? 105 : 82;
+            const g = h * 1.25;
+            for (let k = 0; k < 3; k++) {
+              const tt = 0.95 + k * 0.16;
+              const miss = k === 2 && Math.random() < 0.55;
+              const tx = p.x - speed * 0.5 * tt + (miss ? L * p.s * 1.25 : (k - 1) * 34 * p.s);
+              const ty = miss ? p.y + h * 0.012 : p.y - 21 * p.s;
+              const sx = px + jetSize * (0.02 - k * 0.06), sy = jetY + jetSize * 0.24;
+              bombs.push({ x: sx, y: sy, vx: (tx - sx) / tt, vy: (ty - sy - 0.5 * g * tt * tt) / tt, g, t: 0, dur: tt, ship: miss ? null : sh, spin: (Math.random() - 0.5) * 0.4 });
+            }
+          } else nextBomb = 0.6;
+        }
+      }
+      for (const b of bombs) {
+        b.t += dt;
+        b.vy += b.g * dt;
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+        const bs = h * 0.0019;
+        ctx.save();
+        ctx.translate(b.x, b.y);
+        ctx.rotate(Math.atan2(b.vy, b.vx) + b.spin * b.t);
+        ctx.scale(bs, bs);
+        // tail fins, body with a nose cone, yellow band, highlight
+        ctx.fillStyle = '#2b3026';
+        ctx.beginPath(); ctx.moveTo(-9, 0); ctx.lineTo(-15, -5.5); ctx.lineTo(-12.5, 0); ctx.lineTo(-15, 5.5); ctx.closePath(); ctx.fill();
+        const bg = ctx.createLinearGradient(0, -3.6, 0, 3.6);
+        bg.addColorStop(0, '#8a9478');
+        bg.addColorStop(0.5, '#4f5844');
+        bg.addColorStop(1, '#2a3024');
+        ctx.fillStyle = bg;
+        ctx.beginPath(); ctx.ellipse(0, 0, 11, 3.6, 0, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#ffd166';
+        ctx.fillRect(3.5, -3.3, 1.6, 6.6);
+        ctx.fillStyle = 'rgba(255,255,255,0.35)';
+        ctx.fillRect(-6, -2.6, 12, 0.9);
+        ctx.restore();
+        if (b.t >= b.dur) {
+          b.done = true;
+          if (b.ship && b.ship.hp > 0) {
+            boom(fx, b.x, b.y, h, 1.4);
+            for (let i = 0; i < 6; i++) fx.add({ kind: 'spark', x: b.x, y: b.y, vx: (Math.random() - 0.5) * h * 0.9, vy: -h * (0.3 + Math.random() * 0.6), life: 0.6, r: h * 0.004 });
+            hitShip(b.ship);
+          } else {
+            splash(fx, b.x, b.y, h * 1.2);
+            sfx.boom();
+          }
+        }
+      }
+      bombs = bombs.filter((b) => !b.done && b.y < h + 40);
 
       // flak bursts around the player
       if (running && v.mult > 1.2) {
@@ -2514,6 +2682,13 @@ export function createJetScene() {
           sfx.flak();
           fx.add({ kind: 'flak', x: px + Math.cos(a) * d, y: jetY + Math.sin(a) * d, vx: -speed * 0.3, vy: 0, life: 0.9, r: h * 0.03 });
         }
+      }
+
+      // condensation streams off the wings when you pull hard
+      if (running && v.tPhase > 1.4 && Math.abs(jetVy) > h * 0.3) {
+        const k = clamp((Math.abs(jetVy) - h * 0.3) / (h * 0.6), 0, 1);
+        fx.add({ kind: 'trail', x: px - jetSize * 0.12, y: jetY + jetSize * 0.06, vx: -speed * 0.7, vy: 0, life: 0.25 + k * 0.3, r: h * (0.003 + k * 0.004) });
+        fx.add({ kind: 'trail', x: px - jetSize * 0.42, y: jetY - jetSize * 0.12, vx: -speed * 0.7, vy: 0, life: 0.2 + k * 0.25, r: h * (0.002 + k * 0.003) });
       }
 
       // vapour trails off the wingtip at high speed
@@ -2727,6 +2902,50 @@ export function createJetScene() {
         }
       });
 
+      // embers and ash drifting through the battle
+      if (!reduced && !mini) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const count = 26 + Math.round(zp * 8) + (running ? 10 : 0);
+        for (let i = 0; i < count; i++) {
+          const life = 5 + hash(i, 451) * 5;
+          const ph = ((time + hash(i, 452) * life) % life) / life;
+          const span = w * 1.2;
+          const x = wrap(hash(i, 453) * span - scroll * (0.3 + hash(i, 454) * 0.6) + Math.sin(time * 0.8 + i) * h * 0.02, span) - w * 0.1;
+          const y = h * (0.95 - ph * 0.9) + Math.sin(ph * 9 + i) * h * 0.015;
+          const flick = 0.6 + 0.4 * Math.sin(time * (6 + hash(i, 455) * 8) + i);
+          const a = Math.sin(ph * Math.PI) * flick * (0.5 + hash(i, 456) * 0.5) * (storm > 0.6 ? 0.4 : 1);
+          const r = h * (0.0018 + hash(i, 457) * 0.003);
+          const cool = nightRaid > 0.5 && i % 3 === 0;
+          const eg = ctx.createRadialGradient(x, y, 0, x, y, r * 4);
+          eg.addColorStop(0, cool ? `rgba(190,210,255,${a})` : `rgba(255,210,140,${a})`);
+          eg.addColorStop(0.3, cool ? `rgba(120,150,255,${a * 0.35})` : `rgba(255,120,50,${a * 0.35})`);
+          eg.addColorStop(1, 'rgba(255,90,40,0)');
+          ctx.fillStyle = eg;
+          ctx.fillRect(x - r * 4, y - r * 4, r * 8, r * 8);
+        }
+        ctx.restore();
+      }
+
+      // rain sweeps across the storm front
+      if (storm > 0.05 && !reduced) {
+        ctx.save();
+        ctx.strokeStyle = `rgba(190,210,235,${0.28 * storm})`;
+        ctx.lineWidth = Math.max(1, h * 0.0016);
+        ctx.beginPath();
+        const drops = Math.round(140 * storm);
+        for (let i = 0; i < drops; i++) {
+          const fall = h * (1.6 + hash(i, 461) * 0.8);
+          const y = ((hash(i, 462) * h * 1.2 + time * fall) % (h * 1.2)) - h * 0.1;
+          const x = wrap(hash(i, 463) * w * 1.3 - time * w * 0.25 - y * 0.25, w * 1.3) - w * 0.15;
+          const len = h * (0.03 + hash(i, 464) * 0.03);
+          ctx.moveTo(x, y);
+          ctx.lineTo(x - len * 0.3, y + len);
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
+
       // near clouds rushing past in front of the action
       for (let i = 0; i < 3; i++) {
         const span = w * 2.6;
@@ -2761,37 +2980,42 @@ export function createJetScene() {
 
       /* HUD: battle tally */
       if (!mini && v.phase !== 'betting') {
-        const pad = h * 0.03;
-        const fs = Math.max(11, Math.round(h * 0.03));
+        const pad = Math.max(10, h * 0.025);
+        const fs = Math.max(12, Math.round(h * 0.03));
         ctx.font = `700 ${fs}px "Chakra Petch", system-ui, sans-serif`;
-        const plural = (c, one, many) => `${c} ${c === 1 ? one : many}`;
-        const lines = [
-          [jetIcon, plural(kills.jets, 'jet down', 'jets down')],
-          [shipIcon, plural(kills.ships, 'ship sunk', 'ships sunk')],
-          [missileIcon, plural(kills.dodged, 'missile dodged', 'missiles dodged')],
-        ];
-        const iw = fs * 1.6;
-        const lh = fs * 1.25;
-        const tw = Math.max(...lines.map(([, t]) => ctx.measureText(t).width)) + iw + pad * 1.2;
-        const th = lh * lines.length + fs * 0.5;
-        ctx.fillStyle = 'rgba(8,10,25,0.55)';
-        rr(ctx, pad, pad, tw, th, 8);
+        const items = [[jetIcon, kills.jets, 'Jets'], [shipIcon, kills.ships, 'Ships'], [missileIcon, kills.dodged, 'Dodged']];
+        const iw = fs * 1.5, gap = fs * 0.9, ph = fs * 2;
+        const widths = items.map(([, c]) => iw + ctx.measureText(String(c)).width);
+        const total = widths.reduce((a, b) => a + b, 0) + gap * (items.length - 1) + fs * 1.4;
+        const x0 = w - pad - total, y0 = pad;
+        ctx.fillStyle = 'rgba(6,8,20,0.55)';
+        rr(ctx, x0, y0, total, ph, ph / 2);
         ctx.fill();
-        ctx.fillStyle = '#ff8a3d';
-        ctx.fillRect(pad, pad, 4, th);
+        ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        lines.forEach(([icon, text], i) => {
-          const y = pad + fs * 0.25 + lh * (i + 0.5);
-          icon(ctx, pad + iw * 0.6, y, fs / 16, '#ffd9b8');
+        let x = x0 + fs * 0.7;
+        items.forEach(([icon, c], i) => {
+          icon(ctx, x + iw * 0.45, y0 + ph / 2, fs / 16, '#ffd9b8');
           ctx.fillStyle = '#fff';
-          ctx.fillText(text, pad + iw + pad * 0.2, y);
+          ctx.fillText(String(c), x + iw, y0 + ph / 2 + 1);
+          x += widths[i] + gap;
         });
       }
 
-      const vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.max(w, h) * 0.8);
+      // cinematic colour grade per zone, then a deep vignette
+      ctx.save();
+      ctx.globalCompositeOperation = 'soft-light';
+      ctx.fillStyle = zoneBlend(ZONE_GRADE, zp);
+      ctx.globalAlpha = 0.35;
+      ctx.fillRect(-20, -20, w + 40, h + 40);
+      ctx.restore();
+      const vg = ctx.createRadialGradient(w / 2, h * 0.45, Math.min(w, h) * 0.32, w / 2, h * 0.45, Math.max(w, h) * 0.78);
       vg.addColorStop(0, 'rgba(0,0,0,0)');
-      vg.addColorStop(1, 'rgba(5,8,25,0.45)');
+      vg.addColorStop(0.7, 'rgba(4,6,18,0.25)');
+      vg.addColorStop(1, 'rgba(4,6,18,0.62)');
       ctx.fillStyle = vg;
       ctx.fillRect(-20, -20, w + 40, h + 40);
       ctx.restore();
